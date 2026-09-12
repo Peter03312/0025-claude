@@ -1,0 +1,18 @@
+services:
+  # 核样台前端：宿主端口由 WEB_PORT 决定（默认 8080）
+  web:
+    build:
+      context: .
+      target: web
+    image: signature-proofing-web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+  # 一次性验收服务：跑完测试与构建即退出，并对 web 做 HTTP 冒烟检查
+  verify:
+    build:
+      context: .
+      target: verify
+    image: signature-proofing-verify
+    depends_on:
+      - web
