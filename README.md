@@ -19,9 +19,18 @@
   2. **结构合法后**：逐格比对，定位**由外至内首张不符纸**，并保留该纸**全部四格**的实测 ↔ 期望差异。
 - 全部纸张匹配时，展示**从最外张到最内张的完整套页链**与**唯一可锁线结论**。
 
+## 批量录入
+
+总页数确定、纸堆生成后，可在「批量录入」区一次粘贴整帖页码，避免逐格手录：
+
+- **每行四个整数**（正面左 正面右 反面左 反面右），以单个空格或制表符分隔（兼容 CRLF/CR 与行首尾空白），**行序对应实体纸由外至内**；
+- 只有**行数恰为纸张数且每行恰四项整数**时才**原子替换**当前逐格录入，确认后立即回到嵌套纸张视图，继续使用现有逐格校验与手工编辑；
+- 空项、非整数、多列或少列、行数不符时**保留原录入**，只在批量录入区按 行数 → 列数 → 空项 → 非整数的顺序指出**首个问题**（行 · 项定位）；
+- 批量解析只定形状与整数，越界 / 重复等仍交给结构校验、首张不符判定处理；批量文本不持久化，刷新页面即清空。
+
 ## 技术栈
 
-Vue 3 + TypeScript + Vite；Vitest 检验页码公式（`src/core/signature.spec.ts`），Playwright 检验录入纠错（`e2e/proofing.spec.ts`）。
+Vue 3 + TypeScript + Vite；Vitest 检验页码公式与批量文本解析（`src/core/signature.spec.ts`、`src/core/batch.spec.ts`），Playwright 检验录入纠错与批量填入（`e2e/proofing.spec.ts`）。
 
 ## 本地运行
 
@@ -49,8 +58,9 @@ docker compose up --build verify
 ## 目录结构
 
 ```
-src/core/signature.ts        核心纯逻辑：页码公式、结构校验、首张不符纸定位、套页链
+src/core/signature.ts        核心纯逻辑：页码公式、批量文本解析、结构校验、首张不符纸定位、套页链
 src/core/signature.spec.ts   Vitest：公式与判定单元测试
+src/core/batch.spec.ts       Vitest：批量文本解析（分隔符、行列定位、失败不写入）
 src/components/SheetCard.vue 可展开的嵌套纸张卡片（递归组件）
 src/App.vue                  主界面：参数、纸堆、结论面板
 e2e/proofing.spec.ts         Playwright：录入纠错与判定流程

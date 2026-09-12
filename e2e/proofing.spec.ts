@@ -171,3 +171,98 @@ test('N=4 单张纸全流程', async ({ page }) => {
   await expect(page.getByTestId('conclusion-title')).toHaveText('可锁线');
   await expect(page.getByTestId('chain-0')).toContainText('4 · 1 · 2 · 3');
 });
+
+test('批量填入：合法文本一次带入后可继续改单格并得出结论', async ({ page }) => {
+  await generate(page, '8');
+
+  // 先手工录一张，确认批量填入是整体替换而非追加
+  await fillSheet(page, 0, ['0', '0', '0', '0']);
+  await page.getByTestId('open-batch').click();
+  await expect(page.getByTestId('batch-panel')).toBeVisible();
+  await expect(page.getByTestId('sheet-0')).toBeHidden();
+
+  // 制表符分隔、CRLF 风格粘贴也接受
+  await page.getByTestId('batch-text').fill('8\t1\t2\t7\n6 3 4 5\n');
+  await page.getByTestId('apply-batch').click();
+
+  // 确认后立即回到嵌套纸张视图，四格已带入
+  await expect(page.getByTestId('batch-panel')).toBeHidden();
+  await expect(page.getByTestId('batch-error')).toHaveCount(0);
+  await expect(page.getByTestId('sheet-0')).toBeVisible();
+  await expect(page.getByTestId('input-0-frontLeft')).toHaveValue('8');
+  await expect(page.getByTestId('input-0-backRight')).toHaveValue('7');
+  await expect(page.getByTestId('input-1-frontRight')).toHaveValue('3');
+
+  // 继续走现有逐格校验：先核样为可锁线
+  await page.getByTestId('analyze').click();
+  await expect(page.getByTestId('conclusion-title')).toHaveText('可锁线');
+
+  // 继续手工改单格：第 1 张反面左右翻反
+  await page.getByTestId('input-0-backLeft').fill('7');
+  await page.getByTestId('input-0-backRight').fill('2');
+  await page.getByTestId('analyze').click();
+  await expect(page.getByTestId('conclusion-title')).toContainText('不可锁线');
+  await expect(page.getByTestId('diff-backLeft')).toContainText('✗');
+});
+
+test('批量填入：行数不符时不覆盖已录页码并指出首个问题', async ({ page }) => {
+  await generate(page, '8');
+  await fillSheet(page, 0, N8_SHEET0);
+  await fillSheet(page, 1, N8_SHEET1);
+
+  await page.getByTestId('open-batch').click();
+  await page.getByTestId('batch-text').fill('8 1 2 7'); // 只有 1 行，应为 2 行
+  await page.getByTestId('apply-batch').click();
+
+  // 仍停留在批量录入区并指出首个问题
+  await expect(page.getByTestId('batch-panel')).toBeVisible();
+  const err = page.getByTestId('batch-error');
+  await expect(err).toBeVisible();
+  await expect(err).toContainText('行数不符');
+  await expect(err).toContainText('1 行');
+  await expect(err).toContainText('2 行');
+
+  // 原有逐格录入一个字节都不变
+  await expect(page.getByTestId('input-0-frontLeft')).toHaveValue('8');
+  await expect(page.getByTestId('input-0-backRight')).toHaveValue('7');
+  await expect(page.getByTestId('input-1-frontLeft')).toHaveValue('6');
+  await expect(page.getByTestId('input-1-backRight')).toHaveValue('5');
+
+  // 取消后回到纸堆，已录数据仍在，可直接核样
+  await page.getByTestId('cancel-batch').click();
+  await expect(page.getByTestId('batch-panel')).toBeHidden();
+  await page.getByTestId('analyze').click();
+  await expect(page.getByTestId('conclusion-title')).toHaveText('可锁线');
+});
+
+test('批量填入：列数不符与非整数都不覆盖已录页码', async ({ page }) => {
+  await generate(page, '8');
+  await fillSheet(page, 0, N8_SHEET0);
+  await fillSheet(page, 1, N8_SHEET1);
+  await page.getByTestId('open-batch').click();
+
+  // 第一行少一项
+  await page.getByTestId('batch-text').fill('8 1 2\n6 3 4 5');
+  await page.getByTestId('apply-batch').click();
+  await expect(page.getByTestId('batch-error')).toContainText('第 1 行有 3 项');
+  await expect(page.getByTestId('input-0-frontLeft')).toHaveValue('8');
+  await expect(page.getByTestId('input-1-backRight')).toHaveValue('5');
+
+  // 改成非整数：定位首个问题
+  await page.getByTestId('batch-text').fill('8 1 2 7\n6 x 4 5');
+  await page.getByTestId('apply-batch').click();
+  await expect(page.getByTestId('batch-error')).toContainText('第 2 行第 2 项');
+  await expect(page.getByTestId('batch-error')).toContainText('不是整数');
+  await expect(page.getByTestId('input-1-frontRight')).toHaveValue('3');
+
+  // 文本仍在（刷新才会清空，本次不要求保存）
+  await expect(page.getByTestId('batch-text')).toHaveValue('8 1 2 7\n6 x 4 5');
+});
+
+test('批量文本刷新后不保留', async ({ page }) => {
+  await generate(page, '8');
+  await page.getByTestId('open-batch').click();
+  await page.getByTestId('batch-text').fill('8 1 2 7\n6 3 4 5');
+  await page.reload();
+  await expect(page.getByTestId('batch-panel')).toHaveCount(0);
+});

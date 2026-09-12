@@ -11,8 +11,10 @@ import {
   formatPosition,
   isValidTotalPages,
   nestingChain,
+  parseBatchText,
   sheetCount,
   type AnalysisResult,
+  type BatchProblem,
   type SheetRaw,
   type SheetVerdict,
 } from './core/signature';
@@ -23,6 +25,12 @@ const totalPagesError = ref('');
 const sheets = ref<SheetRaw[]>([]);
 const result = ref<AnalysisResult | null>(null);
 
+// ---------- 批量录入（总页数确定后可用；文本不持久化，刷新即清空） ----------
+
+const batchOpen = ref(false);
+const batchText = ref('');
+const batchProblem = ref<BatchProblem | null>(null);
+
 function generate(): void {
   const text = totalPagesInput.value.trim();
   const n = Number(text);
@@ -31,12 +39,47 @@ function generate(): void {
     totalPages.value = 0;
     sheets.value = [];
     result.value = null;
+    batchOpen.value = false;
+    batchText.value = '';
+    batchProblem.value = null;
     return;
   }
   totalPagesError.value = '';
   totalPages.value = n;
   sheets.value = Array.from({ length: sheetCount(n) }, () => blankSheet());
   result.value = null;
+  batchOpen.value = false;
+  batchText.value = '';
+  batchProblem.value = null;
+}
+
+function openBatch(): void {
+  batchOpen.value = true;
+  batchProblem.value = null;
+}
+
+function closeBatch(): void {
+  batchOpen.value = false;
+  batchProblem.value = null;
+}
+
+/** 用户确认填入：只有解析完全成功才原子替换当前录入，并回到嵌套纸张视图 */
+function applyBatch(): void {
+  const parsed = parseBatchText(batchText.value, sheets.value.length);
+  if (!parsed.ok) {
+    // 任何问题都保留原录入，只在批量录入区指出首个问题
+    batchProblem.value = parsed.problem;
+    return;
+  }
+  const next: SheetRaw[] = Array.from({ length: sheets.value.length }, () => blankSheet());
+  for (const cell of parsed.cells) {
+    next[cell.row][cell.field] = cell.raw;
+  }
+  // 整体替换（watch 会作废旧结论）；批量文本不保存
+  sheets.value = next;
+  batchText.value = '';
+  batchProblem.value = null;
+  batchOpen.value = false;
 }
 
 function runAnalysis(): void {
@@ -107,9 +150,42 @@ const chain = computed(() =>
       <div class="row actions">
         <button type="button" class="primary" data-testid="analyze" @click="runAnalysis">开始核样</button>
         <button type="button" data-testid="clear" @click="clearEntries">清空实测</button>
+        <button
+          type="button"
+          data-testid="open-batch"
+          :aria-expanded="batchOpen"
+          @click="batchOpen ? closeBatch() : openBatch()"
+        >
+          {{ batchOpen ? '收起批量录入' : '批量录入' }}
+        </button>
         <span class="hint">共 {{ sheets.length }} 张纸（k = 0 … {{ sheets.length - 1 }}，由外至内嵌套）</span>
       </div>
-      <div class="stack">
+
+      <!-- 批量录入：每行四个整数（空格或制表符分隔），行序由外至内；文本不持久化 -->
+      <div v-show="batchOpen" class="batch" data-testid="batch-panel">
+        <p class="hint">
+          每行四个整数（正面左 正面右 反面左 反面右），以单个空格或制表符分隔；
+          行序对应实体纸由外至内，须恰有 {{ sheets.length }} 行。仅整体合法时一次替换全部逐格录入。
+        </p>
+        <textarea
+          v-model="batchText"
+          class="batch-text"
+          data-testid="batch-text"
+          rows="6"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="`16 1 2 15\n14 3 4 13\n…（共 ${sheets.length} 行）`"
+        ></textarea>
+        <div class="row">
+          <button type="button" class="primary" data-testid="apply-batch" @click="applyBatch">确认填入</button>
+          <button type="button" data-testid="cancel-batch" @click="closeBatch">取消</button>
+        </div>
+        <p v-if="batchProblem" class="error-text" data-testid="batch-error" role="alert">
+          {{ batchProblem.message }}
+        </p>
+      </div>
+
+      <div v-show="!batchOpen" class="stack">
         <SheetCard :sheets="sheets" :index="0" :total-pages="totalPages" :result="result" />
       </div>
     </section>
@@ -254,6 +330,35 @@ button.primary:hover {
 
 .actions {
   margin-bottom: 12px;
+}
+
+.batch {
+  border: 1px dashed #c4b995;
+  border-radius: 8px;
+  background: #fdfaf0;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.batch .hint {
+  margin: 0 0 8px;
+}
+
+.batch-text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid #c4b995;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.batch .row {
+  margin-top: 2px;
 }
 
 .verdict h2 {
